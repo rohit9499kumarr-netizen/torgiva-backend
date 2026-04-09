@@ -60,6 +60,16 @@ io.on('connection', (socket) => {
         });
         console.log('[DISCONNECT] User chala gaya:', socket.id);
     });
+
+    // 📩 Signal Relay: Chat aur WebRTC signals ko ek doosre tak pahunchane ke liye
+    socket.on('signal', (data) => {
+        if (data.to && data.signal) {
+            io.to(data.to).emit('signal', {
+                from: socket.id,
+                signal: data.signal
+            });
+        }
+    });
 });
 
 const PORT = process.env.PORT || 3000;
