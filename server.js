@@ -4,31 +4,31 @@ const { Server } = require('socket.io');
 
 const app = express();
 const server = http.createServer(app);
+
+// CORS fix for extra stability
 const io = new Server(server, { 
     cors: { 
-        origin: "*",
+        origin: "*", 
         methods: ["GET", "POST"]
     } 
 });
 
-// Regional Matchmaking Queues
-let queues = {
-    india: null,
-    global: null
-};
+let queues = { india: null, global: null };
 
 io.on('connection', (socket) => {
-    console.log('User connected:', socket.id);
+    console.log('[CONNECT] Naya user aaya:', socket.id);
+
     socket.on('find-stranger', (data = {}) => {
         const filter = data.filter || 'global';
+        console.log(`[QUEUE] ${socket.id} ne [${filter}] queue join ki`);
         
-        // Remove from other queues
+        // Safai: Check if user already in a queue
         Object.keys(queues).forEach(key => {
-            if (queues[key] === socket) queues[key] = null;
+            if (queues[key] && queues[key].id === socket.id) queues[key] = null;
         });
 
         if (queues[filter] && queues[filter].id !== socket.id) {
-            // Match found!
+            // MATCH FOUND!
             const stranger = queues[filter];
             queues[filter] = null;
 
@@ -36,6 +36,9 @@ io.on('connection', (socket) => {
             const id2 = stranger.id.replace(/[^a-zA-Z0-9]/g, '').substring(0, 8);
             const sortedIds = [id1, id2].sort();
             const roomId = `room${sortedIds.join('')}`;
+
+            console.log(`[MATCH SUCCESS] ${socket.id} & ${stranger.id} in ${roomId}`);
+
             socket.join(roomId);
             stranger.join(roomId);
             
@@ -44,30 +47,23 @@ io.on('connection', (socket) => {
 
             socket.emit('match-found', { strangerId: stranger.id, roomId: roomId });
             stranger.emit('match-found', { strangerId: socket.id, roomId: roomId });
-            console.log(`Matched ${socket.id} with ${stranger.id} in Room [${roomId}] | Filter: [${filter}]`);
         } else {
+            // Wait in line
             queues[filter] = socket;
-            socket.emit('waiting', `Searching for someone in [${filter}]...`);
-        }
-    });
-
-    socket.on('signal', (data) => {
-        if(data.to) io.to(data.to).emit('signal', { from: socket.id, signal: data.signal });
-    });
-
-    socket.on('chat-message', (data) => {
-        if(socket.matchedRoom) {
-            socket.to(socket.matchedRoom).emit('chat-message', data);
+            console.log(`[WAITING] ${socket.id} queue mein hai...`);
         }
     });
 
     socket.on('disconnect', () => {
         Object.keys(queues).forEach(key => {
-            if (queues[key] === socket) queues[key] = null;
+            if (queues[key] && queues[key].id === socket.id) queues[key] = null;
         });
-        console.log('User disconnected:', socket.id);
+        console.log('[DISCONNECT] User chala gaya:', socket.id);
     });
 });
 
 const PORT = process.env.PORT || 3000;
-server.listen(PORT, () => console.log(`Signaling Server running on port ${PORT}`));
+// Render bind fix
+server.listen(PORT, '0.0.0.0', () => {
+    console.log(`Server live hai port ${PORT} par!`);
+});
