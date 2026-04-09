@@ -13,24 +13,43 @@ const io = new Server(server, {
     } 
 });
 
-let queues = { india: null, global: null };
+let queues = { india: [], global: [] };
 
 io.on('connection', (socket) => {
     console.log('[CONNECT] Naya user aaya:', socket.id);
 
     socket.on('find-stranger', (data = {}) => {
         const filter = data.filter || 'global';
-        console.log(`[QUEUE] ${socket.id} ne [${filter}] queue join ki`);
+        const rawInterest = data.interest ? data.interest.toLowerCase().trim() : '';
+        const interest = rawInterest.replace(/[^a-z0-9]/g, ''); // Clean special chars
         
-        // Safai: Check if user already in a queue
+        console.log(`[QUEUE] ${socket.id} joined [${filter}] interest: [${interest || 'Any'}]`);
+        
+        // Safai: Remove user from all queues first
         Object.keys(queues).forEach(key => {
-            if (queues[key] && queues[key].id === socket.id) queues[key] = null;
+            queues[key] = queues[key].filter(s => s.id !== socket.id);
         });
 
-        if (queues[filter] && queues[filter].id !== socket.id) {
+        if (!queues[filter]) queues[filter] = [];
+        
+        let matchIndex = -1;
+        
+        // Matchmaking logic
+        if (interest) {
+            // 1. Try to find someone with exact same interest
+            matchIndex = queues[filter].findIndex(s => s.interest === interest && s.id !== socket.id);
+            // 2. If nobody has that exact interest, match with someone without any interest (fallback) so they don't wait forever
+            if (matchIndex === -1) {
+                matchIndex = queues[filter].findIndex(s => !s.interest && s.id !== socket.id);
+            }
+        } else {
+            // 3. If I have no interest, match me with anyone at all
+            matchIndex = queues[filter].findIndex(s => s.id !== socket.id);
+        }
+
+        if (matchIndex !== -1) {
             // MATCH FOUND!
-            const stranger = queues[filter];
-            queues[filter] = null;
+            const stranger = queues[filter].splice(matchIndex, 1)[0];
 
             const id1 = socket.id.replace(/[^a-zA-Z0-9]/g, '').substring(0, 8);
             const id2 = stranger.id.replace(/[^a-zA-Z0-9]/g, '').substring(0, 8);
@@ -45,18 +64,28 @@ io.on('connection', (socket) => {
             socket.matchedRoom = roomId;
             stranger.matchedRoom = roomId;
 
-            socket.emit('match-found', { strangerId: stranger.id, roomId: roomId });
-            stranger.emit('match-found', { strangerId: socket.id, roomId: roomId });
+            // Pass identities to each other
+            socket.emit('match-found', { 
+                strangerId: stranger.id, roomId: roomId, 
+                firebaseUid: stranger.firebaseUid, username: stranger.username 
+            });
+            stranger.emit('match-found', { 
+                strangerId: socket.id, roomId: roomId, 
+                firebaseUid: data.firebaseUid, username: data.username 
+            });
         } else {
             // Wait in line
-            queues[filter] = socket;
-            console.log(`[WAITING] ${socket.id} queue mein hai...`);
+            socket.interest = interest;
+            socket.firebaseUid = data.firebaseUid;
+            socket.username = data.username;
+            queues[filter].push(socket);
+            console.log(`[WAITING] ${socket.id} queue mein hai... (Queue size: ${queues[filter].length})`);
         }
     });
 
     socket.on('disconnect', () => {
         Object.keys(queues).forEach(key => {
-            if (queues[key] && queues[key].id === socket.id) queues[key] = null;
+            queues[key] = queues[key].filter(s => s.id !== socket.id);
         });
         console.log('[DISCONNECT] User chala gaya:', socket.id);
     });
